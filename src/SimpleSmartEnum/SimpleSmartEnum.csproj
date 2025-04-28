@@ -1,0 +1,15 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <RootNamespace>SimpleSmartEnum</RootNamespace>
+    <GeneratePackageOnBuild>true</GeneratePackageOnBuild>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <Authors>Jean Poulin</Authors>
+    <Description>SimpleSmartEnum - A lightweight smart enum pattern implementation with auto-registration, JSON serialization and flexible equality support.</Description>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <RepositoryUrl>https://github.com/Yvanddivans/SimpleSmartEnum</RepositoryUrl>
+  </PropertyGroup>
+
+</Project>
