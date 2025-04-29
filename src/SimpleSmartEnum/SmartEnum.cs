@@ -2,7 +2,6 @@
 using System.Reflection;
 using System.Runtime.CompilerServices;
 using System.Text.Json;
-using System.Text.Json.Serialization;
 
 namespace SimpleSmartEnum;
 
@@ -21,7 +20,6 @@ public abstract class SmartEnum(int value, string text, string? code)
     {
         if (IsSmartEnum(type))
         {
-            RuntimeHelpers.RunClassConstructor(type.TypeHandle);
             var prop = type.GetProperty("List", BindingFlags.Public | BindingFlags.Static | BindingFlags.FlattenHierarchy);
             return prop?.GetValue(null) as IReadOnlyCollection<SmartEnum>;
         }
@@ -51,13 +49,20 @@ public abstract class SmartEnum(int value, string text, string? code)
 }
 public abstract class SmartEnum<T> : SmartEnum where T : SmartEnum<T>
 {
-    public static IReadOnlyCollection<T> List => _instances.AsReadOnly();
+    public static IReadOnlyCollection<T> List
+    {
+        get
+        {
+            RuntimeHelpers.RunClassConstructor(typeof(T).TypeHandle);
+            return _instances.AsReadOnly();
+        }
+    }
     private static readonly List<T> _instances = [];
 
     private static JsonSerializerOptions? _JsonSerOpts;
     private static JsonSerializerOptions JsonSerOpts => _JsonSerOpts ??= new JsonSerializerOptions()
     {
-        Converters = { new SmartEnumConverter() },
+        Converters = { new SmartEnumJsonConverterFactory() },
         Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
         WriteIndented = true
     };
@@ -89,7 +94,7 @@ public abstract class SmartEnum<T> : SmartEnum where T : SmartEnum<T>
     public static T? FromValue(int value) => _instances.FirstOrDefault(x => x.Value == value);
     public static T? FromText(string text) => _instances.FirstOrDefault(x => x.Text == text);
     public static T? FromCode(string code) => _instances.FirstOrDefault(x => x.Code == code);
-    public static T? Parse(object obj) { return _instances.FirstOrDefault(e => e == obj); }
+    public static T? Parse(object obj) => List.FirstOrDefault(e => e.Equals(obj));
     public static bool TryParse(object obj, out T? result) { result = Parse(obj); return result is not null; }
 
     public string? ToJson() => JsonSerializer.Serialize(this, JsonSerOpts);
@@ -97,71 +102,25 @@ public abstract class SmartEnum<T> : SmartEnum where T : SmartEnum<T>
 
     // Overrides
     public override int GetHashCode() => HashCode.Combine(GetType(), Value);
-    public override bool Equals(object? obj) =>
-        obj is SmartEnum<T> objSmartEnum &&
-        GetType() == objSmartEnum.GetType() &&
-        Value == objSmartEnum.Value;
+    public override bool Equals(object? obj)
+    {
+        if (obj is SmartEnum<T> enumObj)
+            return Value == enumObj.Value;
+        else if (obj is int intObj)
+            return Value == intObj;
+        else if (obj is string strObj)
+        {
+            return
+                Text?.Equals(strObj, StringComparison.InvariantCultureIgnoreCase) ??
+                Code?.Equals(strObj, StringComparison.InvariantCultureIgnoreCase) ??
+                false;
+        }
+        return base.Equals(obj);
+    }
 
     // Equality operators supporting SmartEnum, Int32 and String, auto-comparing Values, Texts et Codes.
-    public static bool operator ==(SmartEnum<T> leftArgEnum, object rightArgObj)
-    {
-        if (leftArgEnum is not null)
-        {
-            if (rightArgObj is SmartEnum<T>)
-                return leftArgEnum.Equals(rightArgObj);
-            else if (rightArgObj is int)
-                return leftArgEnum.Value.Equals(rightArgObj);
-            else if (rightArgObj is string)
-            {
-                return
-                    leftArgEnum.Text?.Equals((string)rightArgObj, StringComparison.InvariantCultureIgnoreCase) ??
-                    leftArgEnum.Code?.Equals((string)rightArgObj, StringComparison.InvariantCultureIgnoreCase) ??
-                    false;
-            }
-        }
-        return rightArgObj is null;
-    }
+    public static bool operator ==(SmartEnum<T> leftArgEnum, object rightArgObj) { return leftArgEnum?.Equals(rightArgObj) ?? rightArgObj is null; }
     public static bool operator !=(SmartEnum<T> leftArgEnum, object rightArgObj) { return !(leftArgEnum == rightArgObj); }
     public static bool operator ==(object leftArgObj, SmartEnum<T> rightArgEnum) { return rightArgEnum == leftArgObj; }
     public static bool operator !=(object leftArgObj, SmartEnum<T> rightArgEnum) { return !(rightArgEnum == leftArgObj); }
-
-    private class SmartEnumConverter : JsonConverter<SmartEnum<T>>
-    {
-        public override SmartEnum<T>? Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
-        {
-            if (reader.TokenType == JsonTokenType.String)
-            {
-                var str = reader.GetString();
-                return SmartEnum<T>.Parse(str ?? "");
-            }
-            else if (reader.TokenType == JsonTokenType.Number)
-            {
-                var value = reader.GetInt32();
-                return SmartEnum<T>.Parse(value);
-            }
-            else if (reader.TokenType == JsonTokenType.StartObject)
-            {
-                using var doc = JsonDocument.ParseValue(ref reader);
-
-                var value = doc.RootElement.TryGetProperty(nameof(SmartEnum.Value), out var v) ? v.GetInt32() : (int?)null;
-                if (value.HasValue) return SmartEnum<T>.FromValue(value.Value);
-
-                var code = doc.RootElement.TryGetProperty(nameof(SmartEnum.Code), out var c) ? c.GetString() : null;
-                if (!string.IsNullOrWhiteSpace(code)) return SmartEnum<T>.FromCode(code);
-
-                var text = doc.RootElement.TryGetProperty(nameof(SmartEnum.Text), out var t) ? t.GetString() : null;
-                if (!string.IsNullOrWhiteSpace(text)) return SmartEnum<T>.FromText(text);
-            }
-            return default;
-        }
-
-        public override void Write(Utf8JsonWriter writer, SmartEnum<T> value, JsonSerializerOptions options)
-        {
-            writer.WriteStartObject();
-            writer.WriteString(nameof(value.Text), value.Text);
-            writer.WriteString(nameof(value.Code), value.Code);
-            writer.WriteNumber(nameof(value.Value), value.Value);
-            writer.WriteEndObject();
-        }
-    }
 }
